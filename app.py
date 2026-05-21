@@ -678,6 +678,16 @@ with st.sidebar:
             )
 
 
+# ── Navegação — sempre visível no sidebar ────────────────────────────────────
+with st.sidebar:
+    st.markdown("---")
+    st.markdown(
+        '<div style="font-size:.68rem;font-weight:700;color:rgba(255,255,255,.4);letter-spacing:.08em;margin-bottom:8px;">NAVEGAÇÃO</div>'
+        '<a href="https://dash-painel.streamlit.app/" target="_blank" style="display:block;padding:7px 10px;border-radius:8px;text-decoration:none;color:rgba(255,255,255,.8);font-size:.82rem;background:rgba(255,255,255,.06);margin-bottom:4px;">📊 Painel de Clientes</a>'
+        '<a href="https://anacarolinademariamello-hue.github.io/hub-dash/" target="_blank" style="display:block;padding:7px 10px;border-radius:8px;text-decoration:none;color:rgba(255,255,255,.8);font-size:.82rem;background:rgba(255,255,255,.06);">🏠 Central de Ferramentas</a>',
+        unsafe_allow_html=True,
+    )
+
 # ══════════════════════════════════════════════════════════════════════════════
 # MAIN
 # ══════════════════════════════════════════════════════════════════════════════
