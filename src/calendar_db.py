@@ -19,14 +19,33 @@ create table editorial_calendar (
   hook_sugerido   text    default '',
   status          text    default 'ideia',
   observacoes     text    default '',
+  client_status   text    default '',
+  client_comment  text    default '',
   ordem           int     default 0,
   created_at      timestamptz default now(),
   updated_at      timestamptz default now()
 );
 create index on editorial_calendar (client_key, mes_ano);
+
+-- Se a tabela já existe, adicione as novas colunas:
+-- alter table editorial_calendar
+--   add column if not exists client_status  text default '',
+--   add column if not exists client_comment text default '';
+
+-- Tabela de links de aprovação:
+create table calendar_shares (
+  id          serial primary key,
+  token       text unique not null,
+  client_key  text    default '',
+  client_name text    default '',
+  mes_ano     text    default '',
+  created_at  timestamptz default now()
+);
+create index on calendar_shares (token);
 """
 from __future__ import annotations
 
+import secrets
 import requests
 import streamlit as st
 
@@ -78,7 +97,7 @@ def load_calendar(client_key: str, mes_ano: str) -> list[dict]:
                 "select":     (
                     "id,client_key,client_name,mes_ano,data_publicacao,"
                     "formato,plataforma,pilar,tema,objetivo,hook_sugerido,"
-                    "status,observacoes,ordem,created_at"
+                    "status,observacoes,client_status,client_comment,ordem,created_at"
                 ),
             },
             timeout=10,
@@ -221,3 +240,68 @@ def delete_post(post_id: int) -> bool:
 def calendar_exists(client_key: str, mes_ano: str) -> bool:
     posts = load_calendar(client_key, mes_ano)
     return len(posts) > 0
+
+
+# ── Feedback do cliente ───────────────────────────────────────────────────────
+
+def update_client_feedback(post_id: int, client_status: str, client_comment: str = "") -> bool:
+    """Salva aprovação ou pedido de alteração do cliente em um post."""
+    if not _configured():
+        return False
+    try:
+        r = requests.patch(
+            _rest(),
+            headers=_headers(),
+            params={"id": f"eq.{post_id}"},
+            json={"client_status": client_status, "client_comment": client_comment},
+            timeout=10,
+        )
+        load_calendar.clear()
+        return r.status_code in (200, 204)
+    except Exception:
+        return False
+
+
+# ── Link de aprovação ─────────────────────────────────────────────────────────
+
+def create_share_token(client_key: str, client_name: str, mes_ano: str) -> str | None:
+    """Cria um token único de compartilhamento. Retorna o token ou None."""
+    if not _configured():
+        return None
+    token = secrets.token_urlsafe(20)
+    url, _ = _creds()
+    try:
+        r = requests.post(
+            f"{url}/rest/v1/calendar_shares",
+            headers=_headers("return=minimal"),
+            json={
+                "token":       token,
+                "client_key":  client_key,
+                "client_name": client_name,
+                "mes_ano":     mes_ano,
+            },
+            timeout=10,
+        )
+        return token if r.status_code in (200, 201) else None
+    except Exception:
+        return None
+
+
+@st.cache_data(ttl=15)
+def get_share_info(token: str) -> dict | None:
+    """Busca informações do link pelo token."""
+    if not _configured():
+        return None
+    url, _ = _creds()
+    try:
+        r = requests.get(
+            f"{url}/rest/v1/calendar_shares",
+            headers=_headers("return=representation"),
+            params={"token": f"eq.{token}", "select": "client_key,client_name,mes_ano"},
+            timeout=10,
+        )
+        r.raise_for_status()
+        rows = r.json()
+        return rows[0] if rows else None
+    except Exception:
+        return None

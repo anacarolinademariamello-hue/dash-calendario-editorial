@@ -7,20 +7,197 @@ from src.clients import load_clients, load_latest_organic_metrics, load_approved
 from src.calendar_db import (
     load_calendar, save_calendar, update_post, update_status,
     delete_post, calendar_exists,
+    create_share_token, get_share_info, update_client_feedback,
 )
 from src.calendar_gen import (
     generate_calendar, FORMATO_CONFIG, STATUS_CONFIG, MESES_PT, PILARES,
 )
 
+APP_URL = "https://dash-calendario-editorial.streamlit.app"
+
+# ── Detecta modo cliente (share token na URL) ─────────────────────────────────
+_share_token = st.query_params.get("share", None)
+_is_client_view = bool(_share_token)
+
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="Calendário Editorial · Dash Digital",
-    page_icon="📅",
-    layout="wide",
-    initial_sidebar_state="expanded",
+    page_title="Aprovar Calendário · Dash Digital" if _is_client_view else "Calendário Editorial · Dash Digital",
+    page_icon="✅" if _is_client_view else "📅",
+    layout="centered" if _is_client_view else "wide",
+    initial_sidebar_state="collapsed" if _is_client_view else "expanded",
 )
 
 st.markdown(f"<style>{get_sidebar_css()}{get_main_css()}</style>", unsafe_allow_html=True)
+
+# ══════════════════════════════════════════════════════════════════════════════
+# VIEW DO CLIENTE (link de aprovação)
+# ══════════════════════════════════════════════════════════════════════════════
+if _is_client_view:
+    # Esconde sidebar completamente
+    st.markdown(
+        "<style>[data-testid='stSidebar']{display:none!important;}"
+        "[data-testid='collapsedControl']{display:none!important;}</style>",
+        unsafe_allow_html=True,
+    )
+
+    share_info = get_share_info(_share_token)
+    if not share_info:
+        st.error("❌ Link inválido ou expirado. Peça um novo link para a Dash Digital.")
+        st.stop()
+
+    ck       = share_info["client_key"]
+    cname    = share_info["client_name"]
+    mes_ano  = share_info["mes_ano"]
+    mes_int  = int(mes_ano.split("-")[1])
+    ano_int  = int(mes_ano.split("-")[0])
+    mes_lbl  = f"{MESES_PT[mes_int]} de {ano_int}"
+
+    posts_cl = load_calendar(ck, mes_ano)
+
+    # Header
+    st.markdown(
+        f'<div style="background:linear-gradient(135deg,#003f7c,#1a5a9a);'
+        f'border-radius:16px;padding:28px 24px;margin-bottom:24px;text-align:center;">'
+        f'<div style="font-size:2rem;margin-bottom:8px;">📅</div>'
+        f'<h1 style="color:#fff;font-size:1.4rem;margin:0 0 4px;">Calendário Editorial</h1>'
+        f'<div style="color:rgba(255,255,255,.75);font-size:.95rem;">{cname} · {mes_lbl}</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    if not posts_cl:
+        st.info("Nenhum post encontrado neste calendário.")
+        st.stop()
+
+    # Progresso
+    total_cl   = len(posts_cl)
+    aprov_cl   = sum(1 for p in posts_cl if p.get("client_status") == "aprovado")
+    alter_cl   = sum(1 for p in posts_cl if p.get("client_status") == "alteracao")
+    pend_cl    = total_cl - aprov_cl - alter_cl
+    pct        = int(aprov_cl / total_cl * 100) if total_cl else 0
+
+    st.markdown(
+        f'<div style="background:#fff;border:1px solid #e8ecf4;border-radius:14px;'
+        f'padding:18px 20px;margin-bottom:20px;">'
+        f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">'
+        f'<span style="font-weight:700;color:#003f7c;">{aprov_cl} de {total_cl} posts aprovados</span>'
+        f'<span style="font-size:.85rem;color:#9ca3af;">{pct}%</span>'
+        f'</div>'
+        f'<div style="background:#e8ecf4;border-radius:99px;height:8px;">'
+        f'<div style="background:#10b981;border-radius:99px;height:8px;width:{pct}%;transition:width .3s;"></div>'
+        f'</div>'
+        f'<div style="display:flex;gap:16px;margin-top:10px;font-size:.8rem;">'
+        f'<span style="color:#10b981;">✅ {aprov_cl} aprovados</span>'
+        f'<span style="color:#f59e0b;">💬 {alter_cl} com pedido de alteração</span>'
+        f'<span style="color:#9ca3af;">⏳ {pend_cl} pendentes</span>'
+        f'</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    # Botão aprovar todos
+    if pend_cl > 0:
+        if st.button(f"✅ Aprovar todos os {total_cl} posts de uma vez", use_container_width=True, type="primary"):
+            for p in posts_cl:
+                if p.get("client_status") != "aprovado":
+                    update_client_feedback(p["id"], "aprovado")
+            load_calendar.clear()
+            st.success("Todos os posts foram aprovados! 🎉")
+            st.rerun()
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # Lista de posts
+    DIAS_PT_CL = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
+    for p in posts_cl:
+        pid        = p["id"]
+        fmt        = p.get("formato", "")
+        data_str   = str(p.get("data_publicacao", ""))[:10]
+        tema_cl    = p.get("tema", "")
+        hook_cl    = p.get("hook_sugerido", "")
+        pilar_cl   = p.get("pilar", "")
+        cl_status  = p.get("client_status", "")
+        cl_comment = p.get("client_comment", "")
+        icon_cl    = _formato_icon(fmt)
+        cor_cl     = _formato_cor(fmt)
+        cor_bg_cl  = _formato_cor_bg(fmt)
+
+        try:
+            dt_cl    = datetime.date.fromisoformat(data_str)
+            data_lbl = f"{DIAS_PT_CL[dt_cl.weekday()]}, {dt_cl.day:02d}/{dt_cl.month:02d}"
+        except Exception:
+            data_lbl = data_str
+
+        # Badge de status do cliente
+        if cl_status == "aprovado":
+            badge = '<span style="background:#d1fae5;color:#065f46;font-size:.72rem;font-weight:700;padding:3px 10px;border-radius:20px;">✅ Aprovado</span>'
+        elif cl_status == "alteracao":
+            badge = '<span style="background:#fef3c7;color:#92400e;font-size:.72rem;font-weight:700;padding:3px 10px;border-radius:20px;">💬 Alteração solicitada</span>'
+        else:
+            badge = '<span style="background:#f3f4f6;color:#9ca3af;font-size:.72rem;font-weight:700;padding:3px 10px;border-radius:20px;">⏳ Aguardando revisão</span>'
+
+        st.markdown(
+            f'<div style="background:#fff;border:1px solid #e8ecf4;border-radius:14px;'
+            f'padding:18px 20px;margin-bottom:14px;">'
+            f'<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;">'
+            f'<div>'
+            f'<span style="font-size:.75rem;color:#9ca3af;font-weight:600;">{data_lbl}</span><br>'
+            f'<span style="background:{cor_bg_cl};color:{cor_cl};font-size:.78rem;font-weight:700;'
+            f'padding:2px 8px;border-radius:8px;">{icon_cl} {fmt}</span>'
+            f'<span style="font-size:.75rem;color:#9ca3af;margin-left:8px;">{pilar_cl}</span>'
+            f'</div>'
+            f'{badge}'
+            f'</div>'
+            f'<div style="font-size:.95rem;font-weight:700;color:#003f7c;margin-bottom:6px;">{tema_cl}</div>'
+            + (f'<div style="font-size:.83rem;color:#6b7280;font-style:italic;margin-bottom:6px;">"{hook_cl}"</div>' if hook_cl else "")
+            + (f'<div style="background:#fef3c7;border-radius:8px;padding:8px 12px;font-size:.8rem;color:#92400e;margin-top:6px;">💬 Seu comentário: {cl_comment}</div>' if cl_comment else "")
+            + f'</div>',
+            unsafe_allow_html=True,
+        )
+
+        # Botões de ação (só se não aprovado)
+        if cl_status != "aprovado":
+            b1, b2 = st.columns(2)
+            with b1:
+                if st.button("✅ Aprovar", key=f"cl_apr_{pid}", use_container_width=True):
+                    update_client_feedback(pid, "aprovado")
+                    load_calendar.clear()
+                    st.rerun()
+            with b2:
+                if st.button("💬 Pedir alteração", key=f"cl_alt_{pid}", use_container_width=True):
+                    st.session_state[f"cl_show_comment_{pid}"] = True
+
+            if st.session_state.get(f"cl_show_comment_{pid}"):
+                comment_input = st.text_area(
+                    "O que precisa mudar?",
+                    placeholder="Ex: Trocar o tema para algo sobre verão, ou mudar o formato para carrossel...",
+                    height=80,
+                    key=f"cl_comment_{pid}",
+                )
+                if st.button("📤 Enviar pedido", key=f"cl_send_{pid}", use_container_width=True, type="primary"):
+                    if comment_input.strip():
+                        update_client_feedback(pid, "alteracao", comment_input.strip())
+                        st.session_state[f"cl_show_comment_{pid}"] = False
+                        load_calendar.clear()
+                        st.rerun()
+                    else:
+                        st.warning("Escreva o que precisa mudar antes de enviar.")
+        else:
+            # Permite desfazer aprovação
+            if st.button("↩️ Desfazer aprovação", key=f"cl_undo_{pid}", use_container_width=True):
+                update_client_feedback(pid, "")
+                load_calendar.clear()
+                st.rerun()
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+    # Footer
+    st.markdown(
+        f'<div style="text-align:center;font-size:.75rem;color:#9ca3af;margin-top:32px;">'
+        f'Calendário preparado com ❤️ pela Dash Digital · @dashdgt</div>',
+        unsafe_allow_html=True,
+    )
+    st.stop()
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 _TODAY = datetime.date.today()
@@ -425,10 +602,54 @@ with st.sidebar:
                     except Exception as e:
                         st.error(str(e))
 
-        # Download
+        # Download + Compartilhar
         posts_now = load_calendar(selected_client["key"], mes_ano_str)
         if posts_now:
             st.markdown("---")
+
+            # ── Botão compartilhar com cliente ────────────────────────────────
+            share_key = f"share_token_{selected_client['key']}_{mes_ano_str}"
+            if st.button("📤 Compartilhar com cliente", use_container_width=True):
+                token = create_share_token(
+                    selected_client["key"],
+                    selected_client["name"],
+                    mes_ano_str,
+                )
+                if token:
+                    st.session_state[share_key] = token
+                else:
+                    st.error("Erro ao gerar link. Verifique o Supabase.")
+
+            if st.session_state.get(share_key):
+                share_url = f"{APP_URL}?share={st.session_state[share_key]}"
+                st.markdown(
+                    f'<div style="background:rgba(16,185,129,.12);border:1px solid rgba(16,185,129,.3);'
+                    f'border-radius:10px;padding:10px 12px;margin-top:6px;">'
+                    f'<div style="font-size:.68rem;font-weight:700;color:#6ee7b7;margin-bottom:6px;">'
+                    f'✅ LINK GERADO — copie e mande pro cliente</div>'
+                    f'<div style="font-size:.7rem;color:rgba(255,255,255,.7);word-break:break-all;">'
+                    f'{share_url}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+                st.code(share_url, language=None)
+
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            # Resumo de aprovações do cliente
+            aprov_count = sum(1 for p in posts_now if p.get("client_status") == "aprovado")
+            alter_count = sum(1 for p in posts_now if p.get("client_status") == "alteracao")
+            if aprov_count or alter_count:
+                st.markdown(
+                    f'<div style="background:rgba(255,255,255,.06);border-radius:10px;'
+                    f'padding:10px 12px;margin-bottom:8px;font-size:.78rem;">'
+                    f'<div style="color:#f8b940;font-weight:700;margin-bottom:4px;">Aprovação do cliente</div>'
+                    f'<div style="color:#6ee7b7;">✅ {aprov_count} aprovados</div>'
+                    f'<div style="color:#fcd34d;">💬 {alter_count} com alteração</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+
             html_data = _build_download_html(posts_now, selected_client, mes, ano)
             st.download_button(
                 label="⬇️ Baixar em HTML",
@@ -606,10 +827,35 @@ with tab_lista:
             except Exception:
                 data_label = data_str
 
+            cl_st = p.get("client_status", "")
+            cl_badge = ""
+            if cl_st == "aprovado":
+                cl_badge = " ✅"
+            elif cl_st == "alteracao":
+                cl_badge = " 💬"
+
             with st.expander(
-                f"{fmt_icon} {data_label}  ·  {fmt}  ·  {p.get('tema','')[:50]}",
+                f"{fmt_icon} {data_label}  ·  {fmt}  ·  {p.get('tema','')[:50]}{cl_badge}",
                 expanded=(st.session_state.editing_post_id == post_id),
             ):
+                # Feedback do cliente
+                cl_st  = p.get("client_status", "")
+                cl_cmt = p.get("client_comment", "")
+                if cl_st == "aprovado":
+                    st.markdown(
+                        '<div style="background:#d1fae5;color:#065f46;border-radius:8px;'
+                        'padding:8px 14px;font-size:.82rem;font-weight:700;margin-bottom:10px;">'
+                        '✅ Cliente aprovou este post</div>',
+                        unsafe_allow_html=True,
+                    )
+                elif cl_st == "alteracao":
+                    st.markdown(
+                        f'<div style="background:#fef3c7;color:#92400e;border-radius:8px;'
+                        f'padding:8px 14px;font-size:.82rem;margin-bottom:10px;">'
+                        f'<strong>💬 Cliente pediu alteração:</strong> {cl_cmt}</div>',
+                        unsafe_allow_html=True,
+                    )
+
                 # Status badges — clique para mudar
                 st.markdown("**Status:**")
                 status_cols = st.columns(len(STATUS_CONFIG))
