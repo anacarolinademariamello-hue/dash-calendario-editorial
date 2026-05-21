@@ -54,6 +54,28 @@ def _mes_ano_str(mes: int, ano: int) -> str:
     return f"{ano}-{mes:02d}"
 
 
+def _periodo_dates(mes: int, ano: int, periodo: str) -> tuple[str, str]:
+    """Retorna (date_from, date_to) no formato YYYY-MM-DD para o período."""
+    import calendar as _cal
+    _, last = _cal.monthrange(ano, mes)
+    m = f"{mes:02d}"
+    if periodo == "Mês completo":
+        return f"{ano}-{m}-01", f"{ano}-{m}-{last:02d}"
+    elif periodo == "1ª Quinzena (1–15)":
+        return f"{ano}-{m}-01", f"{ano}-{m}-15"
+    elif periodo == "2ª Quinzena (16–fim)":
+        return f"{ano}-{m}-16", f"{ano}-{m}-{last:02d}"
+    elif periodo == "Semana 1 (1–7)":
+        return f"{ano}-{m}-01", f"{ano}-{m}-07"
+    elif periodo == "Semana 2 (8–14)":
+        return f"{ano}-{m}-08", f"{ano}-{m}-14"
+    elif periodo == "Semana 3 (15–21)":
+        return f"{ano}-{m}-15", f"{ano}-{m}-21"
+    elif periodo == "Semana 4 (22–fim)":
+        return f"{ano}-{m}-22", f"{ano}-{m}-{last:02d}"
+    return f"{ano}-{m}-01", f"{ano}-{m}-{last:02d}"
+
+
 def _build_calendar_html(posts: list[dict], mes: int, ano: int) -> str:
     """Monta o HTML do grid de calendário."""
     _, n_days = calendar.monthrange(ano, mes)
@@ -278,6 +300,23 @@ with st.sidebar:
     ano = st.session_state.cal_ano
     mes_ano_str = _mes_ano_str(mes, ano)
 
+    # Período
+    st.markdown("**Período**")
+    periodo_opcoes = [
+        "Mês completo",
+        "1ª Quinzena (1–15)",
+        "2ª Quinzena (16–fim)",
+        "Semana 1 (1–7)",
+        "Semana 2 (8–14)",
+        "Semana 3 (15–21)",
+        "Semana 4 (22–fim)",
+    ]
+    periodo = st.selectbox(
+        "Período",
+        periodo_opcoes,
+        label_visibility="collapsed",
+        key="sb_periodo",
+    )
     st.markdown("---")
 
     # Info do cliente selecionado
@@ -303,19 +342,28 @@ with st.sidebar:
 
         already_exists = calendar_exists(selected_client["key"], mes_ano_str)
 
-        if already_exists:
+        date_from, date_to = _periodo_dates(mes, ano, periodo)
+
+        # Verifica se já existe conteúdo neste período
+        posts_periodo = [
+            p for p in load_calendar(selected_client["key"], mes_ano_str)
+            if date_from <= str(p.get("data_publicacao", ""))[:10] <= date_to
+        ]
+        periodo_tem_posts = len(posts_periodo) > 0
+
+        if periodo_tem_posts:
             st.markdown(
                 f'<div style="background:rgba(16,185,129,.15);border:1px solid rgba(16,185,129,.3);'
                 f'border-radius:8px;padding:8px 12px;font-size:.78rem;color:#6ee7b7;margin-bottom:8px;">'
-                f'✅ Calendário de {MESES_PT[mes]}/{ano} já gerado</div>',
+                f'✅ {len(posts_periodo)} posts gerados para {periodo}</div>',
                 unsafe_allow_html=True,
             )
             if not st.session_state.confirm_regen:
-                if st.button("🔄 Regenerar com IA", use_container_width=True):
+                if st.button("🔄 Regenerar período com IA", use_container_width=True):
                     st.session_state.confirm_regen = True
                     st.rerun()
             else:
-                st.warning("Isso apagará o calendário atual. Confirma?")
+                st.warning(f"Apagará os {len(posts_periodo)} posts deste período. Confirma?")
                 c1, c2 = st.columns(2)
                 with c1:
                     if st.button("✅ Sim", use_container_width=True):
@@ -324,10 +372,15 @@ with st.sidebar:
                             try:
                                 metrics  = load_latest_organic_metrics(selected_client["key"])
                                 approved = load_approved_scripts_themes(selected_client["name"])
-                                posts    = generate_calendar(selected_client, mes, ano, metrics, approved)
-                                ok, msg  = save_calendar(
+                                posts_gen = generate_calendar(
+                                    selected_client, mes, ano, metrics, approved,
+                                    date_from=date_from, date_to=date_to,
+                                    periodo_label=periodo,
+                                )
+                                ok, msg = save_calendar(
                                     selected_client["key"], selected_client["name"],
-                                    mes_ano_str, posts,
+                                    mes_ano_str, posts_gen,
+                                    date_from=date_from, date_to=date_to,
                                 )
                                 if ok:
                                     load_calendar.clear()
@@ -342,15 +395,20 @@ with st.sidebar:
                         st.session_state.confirm_regen = False
                         st.rerun()
         else:
-            if st.button(f"✨ Gerar Calendário com IA", use_container_width=True):
-                with st.spinner("Gerando calendário..."):
+            if st.button(f"✨ Gerar {periodo} com IA", use_container_width=True):
+                with st.spinner(f"Gerando {periodo}..."):
                     try:
                         metrics  = load_latest_organic_metrics(selected_client["key"])
                         approved = load_approved_scripts_themes(selected_client["name"])
-                        posts    = generate_calendar(selected_client, mes, ano, metrics, approved)
-                        ok, msg  = save_calendar(
+                        posts_gen = generate_calendar(
+                            selected_client, mes, ano, metrics, approved,
+                            date_from=date_from, date_to=date_to,
+                            periodo_label=periodo,
+                        )
+                        ok, msg = save_calendar(
                             selected_client["key"], selected_client["name"],
-                            mes_ano_str, posts,
+                            mes_ano_str, posts_gen,
+                            date_from=date_from, date_to=date_to,
                         )
                         if ok:
                             load_calendar.clear()

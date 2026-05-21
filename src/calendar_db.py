@@ -96,25 +96,45 @@ def save_calendar(
     client_name: str,
     mes_ano: str,
     posts: list[dict],
+    date_from: str = "",
+    date_to: str = "",
 ) -> tuple[bool, str]:
     """
-    Apaga o calendário existente do cliente/mês e salva o novo.
+    Salva posts no calendário. Se date_from/date_to fornecidos,
+    apaga apenas posts nesse intervalo antes de inserir.
     Retorna (sucesso, mensagem).
     """
     if not _configured():
         return False, "Supabase não configurado."
 
-    # 1. Deleta posts existentes do mês
+    # 1. Deleta posts do período (intervalo ou mês inteiro)
     try:
-        requests.delete(
-            _rest(),
-            headers=_headers(),
-            params={
-                "client_key": f"eq.{client_key}",
-                "mes_ano":    f"eq.{mes_ano}",
-            },
-            timeout=10,
-        )
+        params = {
+            "client_key": f"eq.{client_key}",
+            "mes_ano":    f"eq.{mes_ano}",
+        }
+        if date_from and date_to:
+            params["data_publicacao"] = f"gte.{date_from}"
+            # Supabase REST não suporta dois filtros na mesma coluna via params dict,
+            # então deletamos por range separado
+            requests.delete(
+                _rest(),
+                headers=_headers(),
+                params={
+                    "client_key":      f"eq.{client_key}",
+                    "mes_ano":         f"eq.{mes_ano}",
+                    "data_publicacao": f"gte.{date_from}",
+                    "and":             f"(data_publicacao.lte.{date_to})",
+                },
+                timeout=10,
+            )
+        else:
+            requests.delete(
+                _rest(),
+                headers=_headers(),
+                params=params,
+                timeout=10,
+            )
     except Exception:
         pass
 

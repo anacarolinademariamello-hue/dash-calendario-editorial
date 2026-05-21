@@ -63,9 +63,37 @@ def _build_prompt(
     ano: int,
     organic_metrics: str,
     approved_themes: str,
+    date_from: str = "",
+    date_to: str = "",
+    periodo_label: str = "",
 ) -> str:
     mes_label = MESES_PT[mes]
-    n_posts = client.get("posts_organicos_mes") or 12  # fallback: 12 posts
+    _, n_days_month = calendar.monthrange(ano, mes)
+
+    # Período efetivo
+    if date_from and date_to:
+        try:
+            import datetime as _dt
+            df = _dt.date.fromisoformat(date_from)
+            dt = _dt.date.fromisoformat(date_to)
+            n_days = (dt - df).days + 1
+            periodo_str = f"{periodo_label} ({df.strftime('%d/%m')} a {dt.strftime('%d/%m/%Y')})"
+            data_ini = date_from
+            data_fim = date_to
+        except Exception:
+            n_days = n_days_month
+            periodo_str = f"{mes_label}/{ano} (mês completo)"
+            data_ini = f"{ano}-{mes:02d}-01"
+            data_fim = f"{ano}-{mes:02d}-{n_days_month:02d}"
+    else:
+        n_days = n_days_month
+        periodo_str = f"{mes_label}/{ano} (mês completo)"
+        data_ini = f"{ano}-{mes:02d}-01"
+        data_fim = f"{ano}-{mes:02d}-{n_days_month:02d}"
+
+    # Posts proporcionais ao período
+    posts_mes = client.get("posts_organicos_mes") or 12
+    n_posts = max(1, round(posts_mes * n_days / n_days_month))
 
     # Plataformas ativas
     plataformas = ["Instagram"]
@@ -75,10 +103,9 @@ def _build_prompt(
         plataformas.append("YouTube")
     plataformas_str = ", ".join(plataformas)
 
-    # Datas do mês
-    _, n_days = calendar.monthrange(ano, mes)
+    # Datas comemorativas relevantes no período
     datas_comemorativas = DATAS_COMEMORATIVAS.get(mes, [])
-    datas_str = "\n".join(f"  • {d}" for d in datas_comemorativas) if datas_comemorativas else "  • Nenhuma data comemorativa relevante neste mês"
+    datas_str = "\n".join(f"  • {d}" for d in datas_comemorativas) if datas_comemorativas else "  • Nenhuma data comemorativa relevante"
 
     # Tags / áreas
     tags = client.get("tags", [])
@@ -104,7 +131,7 @@ def _build_prompt(
     )
 
     prompt = f"""Você é um estrategista de conteúdo orgânico sênior especializado no mercado brasileiro. \
-Sua tarefa é criar um calendário editorial completo e estratégico para o mês de {mes_label} de {ano}.
+Sua tarefa é criar um calendário editorial para o período: {periodo_str}.
 
 ## CLIENTE
 
@@ -116,10 +143,11 @@ Sua tarefa é criar um calendário editorial completo e estratégico para o mês
 - **Descrição:** {client.get('bio','')}
 {tov_block}
 
-## CONTRATO
+## CONTRATO E PERÍODO
 
-- **Posts orgânicos contratados:** {n_posts} posts para o mês de {mes_label}/{ano}
-- **Dias disponíveis no mês:** {n_days} dias
+- **Posts orgânicos contratados:** {posts_mes} posts/mês
+- **Período solicitado:** {periodo_str} ({n_days} dias)
+- **Posts a gerar para este período:** {n_posts} posts (proporcional ao período)
 
 ## PILARES DE CONTEÚDO DISPONÍVEIS
 
@@ -132,7 +160,7 @@ Sua tarefa é criar um calendário editorial completo e estratégico para o mês
 
 ## SUA TAREFA
 
-Distribua os **{n_posts} posts** ao longo do mês de {mes_label}/{ano} seguindo estas diretrizes:
+Distribua os **{n_posts} posts** no período de {data_ini} a {data_fim} seguindo estas diretrizes:
 
 1. **Distribuição temporal:** Espalhe os posts de forma equilibrada. Evite mais de 2 posts no mesmo dia.
 2. **Variedade de formatos:** {"Priorize Reels e Carrossel por terem maior alcance orgânico. " if len(plataformas) == 1 else f"Distribua entre as plataformas: {plataformas_str}. "}Use dados do relatório para definir a proporção ideal.
@@ -167,7 +195,7 @@ O JSON deve ser um array com exatamente {n_posts} objetos, um por post:
   }}
 ]
 
-IMPORTANTE: Todas as datas devem estar dentro de {ano}-{mes:02d}-01 e {ano}-{mes:02d}-{n_days:02d}."""
+IMPORTANTE: Todas as datas devem estar dentro de {data_ini} e {data_fim}."""
 
     return prompt
 
@@ -203,6 +231,9 @@ def generate_calendar(
     ano: int,
     organic_metrics: str = "",
     approved_themes: str = "",
+    date_from: str = "",
+    date_to: str = "",
+    periodo_label: str = "Mês completo",
 ) -> list[dict]:
     """
     Chama o Claude para gerar o calendário editorial.
@@ -217,7 +248,10 @@ def generate_calendar(
         raise ValueError("Chave ANTHROPIC_API_KEY não encontrada em .streamlit/secrets.toml.")
 
     claude = anthropic.Anthropic(api_key=api_key)
-    prompt = _build_prompt(client, mes, ano, organic_metrics, approved_themes)
+    prompt = _build_prompt(
+        client, mes, ano, organic_metrics, approved_themes,
+        date_from=date_from, date_to=date_to, periodo_label=periodo_label,
+    )
 
     message = claude.messages.create(
         model="claude-sonnet-4-6",

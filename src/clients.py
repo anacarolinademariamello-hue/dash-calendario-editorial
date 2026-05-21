@@ -42,11 +42,7 @@ def load_clients() -> list[dict]:
             params={
                 "active": "eq.true",
                 "order":  "name.asc",
-                "select": (
-                    "key,name,handle,tone_of_voice,bio,tags,observations,"
-                    "goals,nicho,sub_nicho,publico_alvo,competitors,"
-                    "posts_organicos_mes,youtube_id,tiktok_id"
-                ),
+                "select": "*",
             },
             timeout=10,
         )
