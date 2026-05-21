@@ -204,20 +204,26 @@ def load_latest_organic_metrics(client_key: str) -> str:
 
 
 @st.cache_data(ttl=60)
-def load_approved_scripts_themes(client_name: str) -> str:
+def load_approved_scripts_themes(client_name: str, client_key: str = "") -> str:
     """
     Carrega temas dos roteiros aprovados para o cliente.
+    Filtra por client_key (preferencial) ou client_name como fallback.
     Retorna texto formatado para o prompt.
     """
-    if not _configured() or not client_name:
+    if not _configured() or (not client_name and not client_key):
         return ""
     url, key = _creds()
+    filter_param = (
+        {"client_key": f"eq.{client_key}"}
+        if client_key
+        else {"client_name": f"eq.{client_name}"}
+    )
     try:
         r = requests.get(
             f"{url}/rest/v1/script_copies",
             headers={"apikey": key, "Authorization": f"Bearer {key}"},
             params={
-                "client_name": f"eq.{client_name}",
+                **filter_param,
                 "status":      "eq.aprovado",
                 "order":       "hook_score_num.desc",
                 "limit":       "10",

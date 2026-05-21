@@ -371,7 +371,10 @@ with st.sidebar:
                         with st.spinner("Gerando..."):
                             try:
                                 metrics  = load_latest_organic_metrics(selected_client["key"])
-                                approved = load_approved_scripts_themes(selected_client["name"])
+                                approved = load_approved_scripts_themes(
+                                    selected_client["name"],
+                                    client_key=selected_client.get("key", ""),
+                                )
                                 posts_gen = generate_calendar(
                                     selected_client, mes, ano, metrics, approved,
                                     date_from=date_from, date_to=date_to,
@@ -399,7 +402,10 @@ with st.sidebar:
                 with st.spinner(f"Gerando {periodo}..."):
                     try:
                         metrics  = load_latest_organic_metrics(selected_client["key"])
-                        approved = load_approved_scripts_themes(selected_client["name"])
+                        approved = load_approved_scripts_themes(
+                            selected_client["name"],
+                            client_key=selected_client.get("key", ""),
+                        )
                         posts_gen = generate_calendar(
                             selected_client, mes, ano, metrics, approved,
                             date_from=date_from, date_to=date_to,
